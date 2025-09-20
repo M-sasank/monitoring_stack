@@ -1,0 +1,7 @@
+.env
+.claude
+.vscode
+
+jaeger-storage/
+
+__pycache__/
