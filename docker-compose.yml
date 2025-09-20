@@ -8,6 +8,7 @@ services:
       - monitoring-network
 
   kafka:
+    restart: always
     image: confluentinc/cp-kafka:7.4.0
     depends_on:
       - zookeeper
@@ -30,6 +31,7 @@ services:
       - monitoring-network
 
   redis:
+    restart: always
     image: redis:7-alpine
     ports:
       - "6379:6379"
@@ -37,6 +39,7 @@ services:
       - monitoring-network
 
   jaeger:
+    restart: always
     image: jaegertracing/all-in-one:latest
     ports:
       - "16686:16686"  # Jaeger UI
@@ -53,7 +56,10 @@ services:
       - monitoring-network
 
   api-service:
-    build: ./api
+    restart: always
+    build:
+      context: .
+      dockerfile: ./api/Dockerfile
     ports:
       - "8080:8080"
     depends_on:
@@ -71,7 +77,10 @@ services:
       - monitoring-network
 
   processing-service:
-    build: ./processing
+    restart: always
+    build:
+      context: .
+      dockerfile: ./processing/Dockerfile
     depends_on:
       kafka:
         condition: service_healthy
@@ -87,7 +96,10 @@ services:
       - monitoring-network
 
   notification-service:
-    build: ./notification
+    restart: always
+    build:
+      context: .
+      dockerfile: ./notification/Dockerfile
     depends_on:
       kafka:
         condition: service_healthy
@@ -103,7 +115,10 @@ services:
       - monitoring-network
 
   analytics-service:
-    build: ./analytics
+    restart: always
+    build:
+      context: .
+      dockerfile: ./analytics/Dockerfile
     depends_on:
       kafka:
         condition: service_healthy

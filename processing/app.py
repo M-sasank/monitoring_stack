@@ -2,6 +2,9 @@ import os
 import time
 import random
 import json
+import threading
+import psutil
+from collections import deque
 from kafka import KafkaProducer, KafkaConsumer
 import redis
 from opentelemetry import trace
@@ -12,6 +15,9 @@ from opentelemetry.instrumentation.kafka import KafkaInstrumentor
 from opentelemetry.instrumentation.redis import RedisInstrumentor
 from opentelemetry.propagate import extract, inject
 from opentelemetry import context
+
+from utils.resource_monitor import create_global_monitor
+from utils.workload_simulator import create_workload_simulator
 
 # OpenTelemetry setup
 from opentelemetry.sdk.resources import Resource
@@ -57,6 +63,12 @@ redis_client = redis.Redis(
     decode_responses=True
 )
 
+# Global resource monitor instance
+resource_monitor = create_global_monitor(sample_interval=0.1)
+
+# Global workload simulator
+workload_simulator = create_workload_simulator(redis_client)
+
 def process_order(order_data, headers):
     tracer = trace.get_tracer(__name__)
     
@@ -64,32 +76,58 @@ def process_order(order_data, headers):
     header_dict = {k: v.decode() if isinstance(v, bytes) else v for k, v in headers}
     parent_context = extract(header_dict)
     
-    with tracer.start_as_current_span("process_order", context=parent_context) as span:
+    with tracer.start_as_current_span("process_order", context=parent_context) as process_order_span:
+        start_time = time.time()
         order_id = order_data['orderId']
         
-        # Simulate heavy processing delay
-        processing_delay = random.uniform(0.5, 1.5)
-        time.sleep(processing_delay)
+        # Realistic data transformation workload
+        with tracer.start_as_current_span("data_transformation") as transformation_span:
+            transformation_start = time.time()
+            workload_type, intensity = workload_simulator.get_random_workload("processing")
+            transformation_result = workload_simulator.execute_workload(
+                workload_type, intensity, transformation_span
+            )
+            transformation_end = time.time()
+            resource_monitor.attach_to_span(transformation_span, transformation_start, transformation_end)
+        
+        # Realistic business logic processing workload
+        with tracer.start_as_current_span("business_logic") as logic_span:
+            logic_start = time.time()
+            workload_type, intensity = workload_simulator.get_random_workload("processing")
+            logic_result = workload_simulator.execute_workload(
+                workload_type, intensity, logic_span
+            )
+            logic_end = time.time()
+            resource_monitor.attach_to_span(logic_span, logic_start, logic_end)
         
         # Update order data
         processed_order = {
             **order_data,
             'status': 'processed',
             'processed_timestamp': time.time(),
-            'processing_delay': processing_delay
+            'transformation_result': transformation_result,
+            'logic_result': logic_result
         }
         
         # Store processing status in Redis
         redis_client.set(f"processing:{order_id}", json.dumps({
             'status': 'processed',
-            'processing_delay': processing_delay,
+            'transformation_operation': transformation_result["operation"],
+            'logic_operation': logic_result["operation"],
             'timestamp': time.time()
         }))
         
+        end_time = time.time()
+        
+        # Add resource stats to main span
+        resource_monitor.attach_to_span(process_order_span, start_time, end_time,
+                                      cpu_threshold=85, memory_threshold_mb=250)
+        
         # Add span attributes
-        span.set_attribute("order.id", order_id)
-        span.set_attribute("order.status", "processed")
-        span.set_attribute("processing.delay", processing_delay)
+        process_order_span.set_attribute("order.id", order_id)
+        process_order_span.set_attribute("order.status", "processed")
+        process_order_span.set_attribute("transformation.operation", transformation_result["operation"])
+        process_order_span.set_attribute("logic.operation", logic_result["operation"])
         
         # Inject trace context into next message
         next_headers = {}
@@ -99,7 +137,7 @@ def process_order(order_data, headers):
         producer.send('processed-orders', value=processed_order, headers=[(k, v.encode() if isinstance(v, str) else v) for k, v in next_headers.items()])
         producer.flush()
         
-        print(f"Processed order {order_id} (delay: {processing_delay:.2f}s)")
+        print(f"Processed order {order_id} (transformation: {transformation_result['operation']}, logic: {logic_result['operation']})")
 
 def main():
     print("Processing Service started. Waiting for orders...")
