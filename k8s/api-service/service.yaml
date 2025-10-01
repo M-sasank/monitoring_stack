@@ -1,0 +1,17 @@
+apiVersion: v1
+kind: Service
+metadata:
+ # DNS name, which will be used to access the service
+  name: api-service
+
+spec:
+  type: NodePort
+  selector:
+    # must match the labels in the deployment
+    service: api
+    environment: test
+  ports:
+    - name: http
+      port: 8080 # port in the cluster
+      targetPort: 8080 # port in the container
+      nodePort: 30080 # port on the node
