@@ -19,10 +19,11 @@ spec:
         service: api
         environment: test
     spec:
+      imagePullSecrets:
+        - name: gcr-json-key
       containers:
         - name: api-service-container
-          image: api-service:latest
-          imagePullPolicy: IfNotPresent
+          image: asia-south1-docker.pkg.dev/devops-sm/kubernetes-practice/api-service:v1.0.0
           ports:
             - containerPort: 8080
           env:
